@@ -1,3 +1,0 @@
-jupyter
-vidbyte-sdk
-python-dotenv

@@ -28,5 +28,5 @@ learning platform.
 ## Status
 
 This folder is being populated. The SDK examples in
-[`../sdk/`](../sdk/) already demonstrate the API-as-tools pattern (see
-`study-agent`'s Vidbyte client) and are the best starting point today.
+[`../sdk/`](../sdk/) already demonstrate the tools-over-real-systems pattern
+these examples will use, and are the best starting point today.

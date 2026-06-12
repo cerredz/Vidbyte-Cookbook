@@ -10,8 +10,8 @@ __pycache__/
 venv/
 
 # Example run artifacts
-deck.json
-quiz.json
+sdk/droid/workspace/
+.ipynb_checkpoints/
 *.log
 
 # OS / editor

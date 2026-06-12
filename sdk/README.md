@@ -1,34 +1,35 @@
-# Vidbyte SDK Examples
+# Vidbyte SDK Examples — production agentic systems, rebuilt minimal
 
-Real-world agent setups built with **`vidbyte-sdk`**, the Python agent
-framework. Install with `pip install vidbyte-sdk`; import as `vidbyte`:
+Each folder here is **one Jupyter notebook** that rebuilds a well-known
+production agentic system from the ground up in a few hundred lines, using
+[`vidbyte-sdk`](https://pypi.org/project/vidbyte-sdk/) (`pip install
+vidbyte-sdk`, imported as `vidbyte`).
 
-```python
-from vidbyte import BaseAgent, tool
-```
+These are not toy demos of SDK features — each notebook starts from what the
+real system actually does, identifies the load-bearing architecture, and
+walks you through building a minimal but honest version of it. They won't be
+perfect replicas; they will teach you the shape of the real thing.
 
-Each example is a self-contained folder showcasing one distinctive SDK
-capability while doing a job someone would actually want done:
-
-| Example | SDK capability showcased | Real-world job |
+| Notebook | Rebuilds | The architecture you'll build |
 |---|---|---|
-| [`study-agent/`](study-agent/) | `@tool` functions + agent tool loop, persistent state behind tools | A spaced-repetition study coach that knows what you're due to review, quizzes you, and reschedules cards based on how you did. |
-| [`paper-to-quiz/`](paper-to-quiz/) | `ContextManager` + `FileContextItem` / `TaskContextItem`, `output_schema` structured output | Turn a research paper into a validated, concept-tagged quiz — a two-stage extract-then-generate pipeline with typed outputs at every step. |
-| [`socratic-tutor-swarm/`](socratic-tutor-swarm/) | `ActorRuntime` (async actor-model runtime, dynamic sub-actors) | A Socratic tutor where a coordinator delegates each turn to specialized sub-actors: explainer, question-writer, misconception-checker. |
+| [`droid/droid.ipynb`](droid/droid.ipynb) | **Factory's Droid** — autonomous software engineering agents | The explore → reproduce → fix → verify loop: file and shell tools jailed to a workspace, a strict operating procedure, independent verification, and a structured run report via `TraceOption.continual(ActionTrace)`. |
+| [`deep-research/deep_research.ipynb`](deep-research/deep_research.ipynb) | **OpenAI Deep Research** — long-form research with citations | The planner → researchers → synthesizer pipeline: typed stage boundaries via `output_schema`, search/read tools, and source-attributed findings so the writer can't make uncited claims. |
+| [`sierra-support/sierra_support.ipynb`](sierra-support/sierra_support.ipynb) | **Sierra** — enterprise customer-service agents | Grounded actions over business systems, two-layer guardrails (policy in the prompt *and* hard limits in tool code), structured human escalation, and a code-level audit log. |
 
-## Common setup
+## Running a notebook
 
-Every example is a Jupyter notebook and follows the same contract:
+Each notebook is fully self-contained — it installs its own dependencies in
+the first cell. You need Python 3.11+, Jupyter, and a model provider key:
 
 ```bash
-cd <example>
-pip install -r requirements.txt
-cp .env.example .env     # add your provider key
-jupyter lab <example>.ipynb   # then run the cells top to bottom
+cp .env.example .env        # at the repo root; add OPENAI_API_KEY
+jupyter lab sdk/droid/droid.ipynb
 ```
 
-Provider and model are configured per-example via `.env`
-(`VIDBYTE_COOKBOOK_PROVIDER`, `VIDBYTE_COOKBOOK_MODEL`); they default to
-OpenAI. Examples that touch the Vidbyte platform use a small client that
-calls the live API when `VIDBYTE_API_URL`/`VIDBYTE_API_KEY` are set and a
-local stub otherwise — the agent code is identical in both modes.
+Run the cells top to bottom. Every notebook ends with a "what the production
+system adds" section and concrete things to try next.
+
+> The systems referenced (Factory, OpenAI, Sierra) are trademarks of their
+> respective owners. These notebooks are independent, minimal educational
+> reimplementations of publicly described architectures — not affiliated
+> with or endorsed by those companies.
