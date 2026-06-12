@@ -1,0 +1,4 @@
+jupyter
+vidbyte-sdk
+python-dotenv
+requests
