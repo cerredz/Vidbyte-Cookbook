@@ -159,7 +159,8 @@ Per-iteration data flow:
 
 Components created (all inside the one notebook):
 - Pydantic schemas: `Subgoal`, `Plan`, `CritiqueItem`, `Critique`, `HandoffChoice`.
-- Agents: `classifier`, `planner`, `worker` (forked per iteration), `debator`.
+- Agents: `classifier`, `planner`, `worker` (rebuilt per iteration via a `make_worker`
+  factory), `debator`.
 - Orchestrator: `SelfRefineLoop` (class) returning a `RefineResult` dataclass.
 - Tools: keyless `search` / `read_article` over Wikipedia (the *worker's* swappable tools).
 
@@ -168,9 +169,11 @@ Key design decisions and why:
   cannot be expressed by `SequentialPipeline`.
 - **Classify handoff once, reuse** — the task's nature doesn't change between iterations;
   re-classifying each round would add cost for no signal.
-- **Fork the worker (and re-instantiate planner/debator) per iteration** — guarantees fresh
-  message history each round, so the only thing carried forward is the explicit critique
-  (the Reflexion property), not implicit conversation bleed.
+- **A fresh agent per iteration** — the worker is *rebuilt* by a `make_worker` factory (its
+  handoff shape is only known at runtime, and `fork()` always inherits the parent's
+  `handoff=` and cannot override it); the planner and debator are *forked*. Either path
+  starts each round with empty history, so the only thing carried forward is the explicit
+  critique (the Reflexion property), not implicit conversation bleed.
 - **Latest, not best, output returned** — per the user's decision; the design keeps full
   history so a reader can switch to best-by-fault-count in one line.
 
@@ -223,8 +226,8 @@ class HandoffChoice(BaseModel):
 **Type:** New
 
 #### What it does
-Constructs the classifier, planner, worker base, and debator with the right schema, tools,
-middleware, and handoff configuration.
+Constructs the classifier, planner, and debator as module-level agents, and a `make_worker`
+factory that builds a fresh worker (with the runtime-chosen handoff) each round.
 
 #### Interface / API
 ```python
@@ -234,19 +237,22 @@ classifier = BaseAgent(name="handoff-classifier", system_prompt=CLASSIFIER_PROMP
 planner    = BaseAgent(name="planner", system_prompt=PLANNER_PROMPT,
                        provider=PROVIDER, model_name=MODEL, output_schema=Plan)
 
-worker_base = BaseAgent(name="worker", system_prompt=WORKER_PROMPT,
-                        provider=PROVIDER, model_name=MODEL, tools=WORKER_TOOLS,
-                        middleware=worker_middleware, max_tool_rounds=MAX_TOOL_ROUNDS,
-                        handoff=<chosen prebuilt handoff>)   # set after classification
-
 debator    = BaseAgent(name="debator", system_prompt=DEBATOR_PROMPT,
                        provider=PROVIDER, model_name=MODEL, output_schema=Critique)
+
+def make_worker(handoff_spec, i):   # fork() can't override handoff=, so rebuild per round
+    return BaseAgent(name=f"worker-{i}", system_prompt=WORKER_PROMPT,
+                     provider=PROVIDER, model_name=MODEL, tools=WORKER_TOOLS,
+                     middleware=build_worker_middleware(), max_tool_rounds=MAX_TOOL_ROUNDS,
+                     handoff=handoff_spec)
 ```
 
 #### Logic / Algorithm
 1. Only the worker gets tools (the "whatever tools" passthrough). Planner, debator, and
    classifier are reasoning-only.
-2. The chosen handoff prebuilt is set on the worker base via `handoff=`; forks inherit it.
+2. The chosen handoff prebuilt is passed to `make_worker` via `handoff=`; a fresh worker is
+   built each round because `fork()` always inherits the parent's handoff and cannot
+   override it. Each worker also gets a fresh `build_worker_middleware()` guard set.
 
 #### Edge Cases & Error Handling
 - If `reply.metadata.get("handoff")` is `None` (fail-open handoff failure), the loop falls
@@ -273,28 +279,34 @@ class RefineResult:
     history: list[dict]        # per-iteration: plan, output, handoff, critique, n_faults
 
 class SelfRefineLoop:
-    def __init__(self, task, *, planner, worker_base, debator, classifier,
-                 max_loop_iterations=3, debator_items=1): ...
+    def __init__(self, task, *, max_loop_iterations=3, debator_items=1): ...
     def run(self) -> RefineResult: ...
-    def _choose_handoff(self): ...                       # classifier → prebuilt handoff
-    def _plan(self, critique) -> Plan: ...               # task (+critique on N≥2) → Plan
-    def _execute(self, plan, critique): ...              # → (output_text, handoff_doc)
-    def _critique(self, output, handoff_doc) -> Critique: ...
-    def _should_stop(self, critique, iteration): ...     # → (bool, reason)
+    def _choose_handoff(self): ...                          # classifier → prebuilt handoff
+    def _plan(self, critique, i) -> Plan: ...               # task (+critique on N≥2) → Plan
+    def _execute(self, plan, critique, i): ...              # → (output_text, handoff_doc)
+    def _critique(self, output, handoff_doc, i) -> Critique: ...
+    def _should_stop(self, critique, iteration): ...        # → (bool, reason)
+    def _record(self, iteration, plan, output, handoff_doc, critique): ...
 ```
+
+The agents (`classifier`, `planner`, `debator`) and the `make_worker` factory are
+module-level — the cookbook idiom. The harness's configurable surface (the user's
+"whatever prompt / whatever tools / whatever config") is exposed as: the `task` argument,
+the `WORKER_TOOLS` list, and the `PROVIDER` / `MODEL` env vars.
 
 #### Logic / Algorithm
 1. `_choose_handoff()` runs the classifier once; map `kind` → `EngineeringHandoff()` /
-   `ResearchHandoff()` / `MinimalHandoff()`; rebuild the worker base with `handoff=spec`.
+   `ResearchHandoff()` / `MinimalHandoff()`; store the spec for `make_worker`.
 2. `critique = None`; `for i in 1..max_loop_iterations:`
-   1. `plan = _plan(critique)` — fork a fresh planner; prompt includes the latest critique
-      when `critique` is not `None`. Append to history.
-   2. `output, handoff_doc = _execute(plan, critique)` — fork a fresh worker; prompt
-      includes the plan and (when present) the critique checklist; read back
-      `reply.metadata["handoff"]`.
-   3. `critique = _critique(output, handoff_doc)` — fork a fresh debator; pass the handoff
+   1. `plan = _plan(critique, i)` — fork a fresh planner; prompt includes the latest critique
+      when `critique` is not `None`.
+   2. `output, handoff_doc = _execute(plan, critique, i)` — build a fresh worker via
+      `make_worker`; prompt includes the plan and (when present) the critique checklist;
+      read back `reply.metadata["handoff"]` (falling back to `last_handoff`).
+   3. `critique = _critique(output, handoff_doc, i)` — fork a fresh debator; pass the handoff
       via `AgentInput(prompt, context_items=(handoff_doc,))` when present.
-   4. `stop, reason = _should_stop(critique, i)`; if `stop`, return `RefineResult`.
+   4. `_record(...)` appends the iteration's artifacts; `stop, reason = _should_stop(critique, i)`;
+      if `stop`, return `RefineResult`.
 3. If the loop exits via the cap, return with `stop_reason="max_iterations"`.
 
 #### Edge Cases & Error Handling
