@@ -57,6 +57,7 @@ jupyter lab sdk/droid/droid.ipynb
 | [`sdk/droid`](sdk/droid/droid.ipynb) | Factory's **Droid** — an autonomous software engineer that takes a ticket, edits a repo, runs tests until green, and reports back | `@tool` file/shell tools, `max_iterations`, `TraceOption.continual(ActionTrace)` for the structured run report |
 | [`sdk/deep-research`](sdk/deep-research/deep_research.ipynb) | OpenAI's **Deep Research** — decompose a question, research each thread, synthesize a cited report | `output_schema` typed stage boundaries, search/read tools, multi-agent pipeline |
 | [`sdk/sierra-support`](sdk/sierra-support/sierra_support.ipynb) | **Sierra** — a customer-service agent that resolves real issues under hard policy with human escalation | tools as grounded actions, code-level guardrails, structured escalation, audit log |
+| [`sdk/self-refine`](sdk/self-refine/self_refine.ipynb) | **Reflexion / Self-Refine** — a planner → worker → devil's-advocate debator loop that refines an answer until the critic runs out of faults | `output_schema` typed plan + critique, `handoff=` prebuilts, `AgentInput(context_items=...)`, `.fork()`, budget/runtime middleware |
 | `api/` | — | REST and MCP quickstarts; see [`api/README.md`](api/README.md) for the roadmap. |
 
 ## Requirements

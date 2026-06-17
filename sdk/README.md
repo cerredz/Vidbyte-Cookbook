@@ -15,6 +15,7 @@ perfect replicas; they will teach you the shape of the real thing.
 | [`droid/droid.ipynb`](droid/droid.ipynb) | **Factory's Droid** — autonomous software engineering agents | The explore → reproduce → fix → verify loop: file and shell tools jailed to a workspace, a strict operating procedure, independent verification, and a structured run report via `TraceOption.continual(ActionTrace)`. |
 | [`deep-research/deep_research.ipynb`](deep-research/deep_research.ipynb) | **OpenAI Deep Research** — long-form research with citations | The planner → researchers → synthesizer pipeline: typed stage boundaries via `output_schema`, search/read tools, and source-attributed findings so the writer can't make uncited claims. |
 | [`sierra-support/sierra_support.ipynb`](sierra-support/sierra_support.ipynb) | **Sierra** — enterprise customer-service agents | Grounded actions over business systems, two-layer guardrails (policy in the prompt *and* hard limits in tool code), structured human escalation, and a code-level audit log. |
+| [`self-refine/self_refine.ipynb`](self-refine/self_refine.ipynb) | **Reflexion / Self-Refine** — a self-improving multi-agent loop | The plan → execute → critique → re-plan loop as three named agents: a planner that emits typed subgoals, a tool-using worker that re-attempts fresh each round and emits a `handoff`, and a devil's-advocate debator whose typed fault list is the loop's stop signal. |
 
 ## Running a notebook
 
