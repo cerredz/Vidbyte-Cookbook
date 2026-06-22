@@ -58,6 +58,7 @@ jupyter lab sdk/droid/droid.ipynb
 | [`sdk/deep-research`](sdk/deep-research/deep_research.ipynb) | OpenAI's **Deep Research** — decompose a question, research each thread, synthesize a cited report | `output_schema` typed stage boundaries, search/read tools, multi-agent pipeline |
 | [`sdk/sierra-support`](sdk/sierra-support/sierra_support.ipynb) | **Sierra** — a customer-service agent that resolves real issues under hard policy with human escalation | tools as grounded actions, code-level guardrails, structured escalation, audit log |
 | [`sdk/self-refine`](sdk/self-refine/self_refine.ipynb) | **Reflexion / Self-Refine** — a planner → worker → devil's-advocate debator loop that refines an answer until the critic runs out of faults | `output_schema` typed plan + critique, `handoff=` prebuilts, `AgentInput(context_items=...)`, `.fork()`, budget/runtime middleware |
+| [`sdk/sakana-fugu`](sdk/sakana-fugu/sakana_fugu.ipynb) | Sakana AI's **Sakana Fugu** — a multi-agent orchestration system that behaves like a single model: route *direct vs. delegate*, dispatch across a swappable multi-vendor pool, and route around unavailable providers | multi-vendor `BaseAgent` pool, `output_schema` routing plan, a class orchestrator with route-around resilience, budget/resilience middleware |
 | `api/` | — | REST and MCP quickstarts; see [`api/README.md`](api/README.md) for the roadmap. |
 
 ## Requirements
@@ -72,8 +73,8 @@ This cookbook is pre-release and tracks the current `vidbyte-sdk` surface.
 APIs may change before the first stable release. Licensing follows the
 Vidbyte SDK's release licensing (TBD).
 
-The production systems referenced in `sdk/` (Factory, OpenAI, Sierra) are
-trademarks of their respective owners; the notebooks are independent,
+The production systems referenced in `sdk/` (Factory, OpenAI, Sierra, Sakana AI)
+are trademarks of their respective owners; the notebooks are independent,
 minimal educational reimplementations of publicly described architectures,
 not affiliated with or endorsed by those companies.
 
