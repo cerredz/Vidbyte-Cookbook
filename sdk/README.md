@@ -16,6 +16,7 @@ perfect replicas; they will teach you the shape of the real thing.
 | [`deep-research/deep_research.ipynb`](deep-research/deep_research.ipynb) | **OpenAI Deep Research** — long-form research with citations | The planner → researchers → synthesizer pipeline: typed stage boundaries via `output_schema`, search/read tools, and source-attributed findings so the writer can't make uncited claims. |
 | [`sierra-support/sierra_support.ipynb`](sierra-support/sierra_support.ipynb) | **Sierra** — enterprise customer-service agents | Grounded actions over business systems, two-layer guardrails (policy in the prompt *and* hard limits in tool code), structured human escalation, and a code-level audit log. |
 | [`self-refine/self_refine.ipynb`](self-refine/self_refine.ipynb) | **Reflexion / Self-Refine** — a self-improving multi-agent loop | The plan → execute → critique → re-plan loop as three named agents: a planner that emits typed subgoals, a tool-using worker that re-attempts fresh each round and emits a `handoff`, and a devil's-advocate debator whose typed fault list is the loop's stop signal. |
+| [`sakana-fugu/sakana_fugu.ipynb`](sakana-fugu/sakana_fugu.ipynb) | **Sakana Fugu** — multi-agent orchestration behind one model API | A `Fugu` facade whose `run()` asks a learned orchestrator (`output_schema`) to route *direct vs. delegate*, dispatches subtasks across a swappable multi-vendor `BaseAgent` pool, and **routes around** any unavailable provider — demonstrable with only `OPENAI_API_KEY`. Two tiers, agent opt-out, and guarded recursive self-call. |
 
 ## Running a notebook
 
@@ -30,7 +31,7 @@ jupyter lab sdk/droid/droid.ipynb
 Run the cells top to bottom. Every notebook ends with a "what the production
 system adds" section and concrete things to try next.
 
-> The systems referenced (Factory, OpenAI, Sierra) are trademarks of their
-> respective owners. These notebooks are independent, minimal educational
+> The systems referenced (Factory, OpenAI, Sierra, Sakana AI) are trademarks of
+> their respective owners. These notebooks are independent, minimal educational
 > reimplementations of publicly described architectures — not affiliated
 > with or endorsed by those companies.
