@@ -33,8 +33,9 @@ notebook" format.
   and guarded recursive self-call.
 - Use real `vidbyte-sdk` primitives (`BaseAgent`, `output_schema`, `fork`,
   budget/runtime middleware) rather than hand-rolled equivalents.
-- Keep the implementation minimal — the orchestration core well under ~80 lines
-  of Python — per the user's explicit "least amount of code lines" ask.
+- Keep the implementation minimal — the orchestration core compressed into one
+  notebook code block, well under ~80 lines of Python — per the user's explicit
+  "least amount of code lines" ask.
 - Be runnable top-to-bottom with a single `OPENAI_API_KEY`, and make the
   route-around feature *demonstrable* with only that one key.
 - Conform to the cookbook's notebook structure and update both index READMEs.
@@ -201,11 +202,11 @@ The notebook builds a single `Fugu` facade class over three kinds of SDK
 
 ## 6. Detailed Design
 
-The deliverable is one notebook. Cells that define the orchestration core are
-marked with a leading `# [fugu-core]` sentinel comment so the verification script
-can exec exactly those cells offline (no `%pip`, env, or model-running cells).
-Core cells import only `os`, `dataclasses`, `typing`, and `pydantic` — never
-`vidbyte` at definition time.
+The deliverable is one notebook whose Fugu product core fits in one code block.
+That block is marked with a leading `# [fugu-core]` sentinel comment so the
+verification script can exec it offline (no `%pip`, env, or model-running cells).
+It imports only `os`, `dataclasses`, `typing`, and `pydantic` — never `vidbyte`
+at definition time.
 
 ### 6.1 Schemas (`# [fugu-core]`)
 
@@ -414,7 +415,7 @@ Counts: **3 created, 2 modified, 0 deleted.**
 ## 10. Testing Plan
 
 The verification script `scripts/test_sakana_fugu.py` loads the notebook as JSON,
-execs only the `# [fugu-core]` cells (offline, no SDK), and drives `Fugu` with
+execs only the single `# [fugu-core]` cell (offline, no SDK), and drives `Fugu` with
 **fake agents**. A `FakeAgent` returns a canned `reply` whose `.content` is a
 fixed string and (for the orchestrator) whose `.metadata["structured"]` is a
 chosen `OrchestrationPlan`. A `FailingAgent` raises on `.run`. Availability is
@@ -533,8 +534,8 @@ controlled by setting/clearing provider env vars inside each test.
 ### Alternative 4: Put the core in a `.py` module beside the notebook
 - **What:** Ship `sdk/sakana-fugu/fugu.py` and import it from the notebook + tests.
 - **Why rejected:** The cookbook skill mandates *exactly one notebook* per folder.
-  Instead, the core cells are marked `# [fugu-core]` and the test harness execs
-  just those from the `.ipynb`, keeping the single-notebook rule while staying
+  Instead, one compact core cell is marked `# [fugu-core]` and the test harness execs
+  just that cell from the `.ipynb`, keeping the single-notebook rule while staying
   testable.
 
 ---
