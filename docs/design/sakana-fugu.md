@@ -3,7 +3,7 @@
 **Status:** Draft
 **Author:** Claude
 **Created:** 2026-06-22
-**Last Updated:** 2026-06-22
+**Last Updated:** 2026-06-24
 
 ---
 
@@ -13,13 +13,17 @@ Sakana Fugu is a product (announced 2026-06-22) that presents a *full multi-agen
 orchestration system as a single model API*. You call one endpoint; internally a
 learned orchestrator decides whether to answer directly or to assemble a team of
 expert models drawn from a swappable, multi-vendor pool, then synthesizes their
-work into one answer. Its headline differentiator is **resilience to
-single-vendor disruption**: if a provider becomes unavailable (export controls,
-outage, opt-out), Fugu dynamically routes the work to another model in the pool.
-This feature adds a new cookbook example — `sdk/sakana-fugu/sakana_fugu.ipynb` —
-that rebuilds that load-bearing architecture minimally with the Vidbyte SDK,
-following the cookbook's existing "rebuild a production agentic system in one
-notebook" format.
+work into one answer. Its headline shape is **two models, one API**: a fast
+default (`Fugu`) and a max-quality tier (`Fugu Ultra`), both behind the same
+`run` call, with an opt-out mechanism for compliance/privacy. This cookbook
+example — `sdk/sakana-fugu/sakana_fugu.ipynb` — rebuilds that load-bearing
+architecture minimally with the Vidbyte SDK, following the cookbook's existing
+"rebuild a production agentic system in one notebook" format.
+
+The implementation is intentionally reduced to the orchestration skeleton: a
+single `Fugu` facade class with exactly two methods — `run` (the public
+single-model API) and `orchestrate` (the internal route + assemble + synthesize
+step). Everything else is inlined.
 
 ---
 
@@ -27,21 +31,23 @@ notebook" format.
 
 ### Goals
 - Add one self-contained cookbook notebook that faithfully rebuilds Fugu's
-  *load-bearing* architecture: single-model facade, learned route (direct vs.
-  delegate), swappable multi-vendor pool, dispatch → synthesize, **route-around
-  on provider unavailability**, two tiers (Fugu / Fugu Ultra), agent opt-out,
-  and guarded recursive self-call.
+  *load-bearing* architecture: a single-model facade, a learned route (direct
+  vs. delegate), a swappable multi-vendor pool, a synthesize step over the
+  team's outputs, two tiers (Fugu / Fugu Ultra), and agent opt-out.
+- Keep the `Fugu` class down to just `run` and `orchestrate` — no subtask
+  decomposition, no dispatch/resolve helpers, no direct-solve helper, no
+  verbose tracer, and no `build_fugu()` factory. The notebook constructs the
+  agents inline and calls `fugu.run(...)` directly.
 - Use the minimal real `vidbyte-sdk` primitive set needed for the product shape:
   `BaseAgent`, `@tool`, `output_schema`, and budget/runtime/retry middleware.
 - Keep the implementation minimal — the entire notebook is one executable code
-  cell containing the Fugu facade and live SDK wiring — per the user's explicit
-  "one Jupyter notebook cell, one code block" ask.
-- Be runnable top-to-bottom with a single `OPENAI_API_KEY`, and make the
-  route-around feature *demonstrable* with only that one key.
+  cell — per the user's explicit "one Jupyter notebook cell, one code block" ask.
+- Be runnable top-to-bottom with a single `OPENAI_API_KEY`; only the OpenAI
+  pool member is callable with that one key.
 - Keep the folder as a single-notebook cookbook example and update both index READMEs.
 - Ship a deterministic verification script that tests the orchestration logic
-  (routing, route-around, opt-out, tiers, recursion) with fake agents — no live
-  model calls.
+  (routing, synthesize, opt-out, tiers, availability gating) with fake agents —
+  no live model calls.
 
 ### Non-Goals
 - Training or imitating a real "orchestration model." Our orchestrator is a
@@ -51,9 +57,14 @@ notebook" format.
   single Python method (`Fugu.run`), matching the other cookbook notebooks.
 - Benchmark reproduction, billing tiers, or subscription/pay-as-you-go logic.
 - Streaming, persistent state, or a UI.
-- Guaranteeing the named non-OpenAI providers actually run in the demo — they are
-  intentionally treated as "unavailable" when their keys are absent, which is the
-  whole point of the route-around demonstration.
+- Route-around / runtime failover. Providers whose API keys are absent are
+  simply not part of the available team for a given call — there is no
+  re-assignment machinery. (Earlier iterations had this; it was removed to keep
+  the class to `run` + `orchestrate`.)
+- Subtask decomposition / per-subtask model assignment. In `delegate` mode the
+  whole request is handed to every available expert; the orchestrator no longer
+  emits a subtask list.
+- Recursive self-call. Removed with the subtask logic.
 
 ---
 
@@ -63,19 +74,17 @@ notebook" format.
   premise is rebuilding well-known production agentic systems, so Fugu is a
   timely, on-format addition.
 - **Problem it solves (for the reader):** Multi-agent orchestration is usually
-  wired by hand and is brittle to single-vendor dependency. The notebook teaches
-  both *what Fugu does* and *how little code the load-bearing skeleton takes* on
-  the Vidbyte SDK.
+  wired by hand. The notebook teaches both *what Fugu does* and *how little code
+  the load-bearing skeleton takes* on the Vidbyte SDK.
 - **Current state (base = `main`):** `sdk/` contains `droid/`, `deep-research/`,
   `sierra-support/`, and `self-refine/`, each one notebook; `docs/design/`
   already exists. `deep-research` and `self-refine` are the closest analogs —
   `deep-research` is a planner → researchers → synthesizer pipeline with
   `output_schema`; `self-refine` is a plain-Python class orchestrator
   (`SelfRefineLoop`) with small named methods and a `@dataclass` result. Fugu
-  differs by adding *learned* routing, a *multi-vendor* pool, and *route-around*
-  resilience, and follows `self-refine`'s class-orchestrator house style.
-- **Constraints/dependencies:** The cookbook skill
-  (`.claude/skills/vidbyte-cookbook-example.md`) mandates a self-contained
+  follows `self-refine`'s class-orchestrator house style but is stripped to a
+  single `orchestrate` method.
+- **Constraints/dependencies:** The cookbook skill mandates a self-contained
   notebook with budget + safety middleware, real SDK built-ins, and clean
   top-to-bottom execution on Python 3.11+ with one provider key. `vidbyte-sdk`
   is imported as `vidbyte`; providers supported include `openai`, `anthropic`,
@@ -92,47 +101,35 @@ notebook" format.
 1. The notebook MUST expose a single facade, `Fugu.run(prompt) -> str`, that
    returns one answer — the multi-agent machinery never surfaces to the caller.
 2. A **learned orchestrator** (`BaseAgent` with `output_schema`) MUST decide per
-   request between `direct` (answer with one model) and `delegate` (decompose
-   into subtasks assigned to pool specialties). Routing MUST come from the
-   model's structured output, not a hardcoded keyword predicate.
+   request between `direct` (answer with one model) and `delegate` (assemble a
+   team). Routing MUST come from the model's structured output, not a hardcoded
+   keyword predicate.
 3. The system MUST hold a **swappable, multi-vendor pool** of `BaseAgent`s keyed
    by specialty, each configured with a distinct `provider`/`model_name`. Adding
    or swapping a model MUST be a one-line change to the pool definition.
-4. In `delegate` mode, the system MUST dispatch each subtask to its assigned pool
-   model and then **synthesize** all worker outputs into one answer.
-5. **Route-around (headline):** If a subtask's assigned model is unavailable —
-   provider key absent, model opted out, or the call raises at runtime — Fugu
-   MUST transparently route that subtask to another *available* pool model and
-   still produce an answer. It MUST NEVER return an empty/partial answer silently
-   because a provider was unavailable.
-6. If *no* pool model is available, `Fugu.run` MUST raise a clear, explicit error
+4. In `delegate` mode, the system MUST call every **available** pool expert on
+   the request and then **synthesize** their labeled outputs into one answer.
+5. If *no* pool model is available, `Fugu.run` MUST raise a clear, explicit error
    (not return `""` or a misleading success).
-7. **Opt-out:** The caller MUST be able to exclude specific pool members (by key)
-   for privacy/compliance; excluded members MUST be treated as unavailable for
-   both assignment and route-around.
-8. **Two tiers:** `Fugu` (fast: synthesize once, no verification) and
+6. **Opt-out:** The caller MUST be able to exclude specific pool members (by key)
+   for privacy/compliance; excluded members MUST never be called.
+7. **Two tiers:** `Fugu` (fast: synthesize once, no verification) and
    `Fugu Ultra` (`ultra=True`: add a verification/critique pass over the
    synthesized answer). Both MUST be the same class behind the same `run` API.
-9. **Recursive self-call:** The orchestrator MAY assign a subtask to Fugu itself;
-   recursion MUST be depth-limited so it always terminates.
-10. `delegate` mode with an empty subtask list MUST fall back to `direct` rather
-    than returning an empty answer.
-11. An unknown `assigned_to` key MUST route around (pick any available model),
-    not raise `KeyError`.
-12. The notebook MUST expose a one-line `build_fugu().run(...)` usage path that
-    demonstrates route-around with only `OPENAI_API_KEY` set.
+8. The notebook MUST construct the `Fugu` instance inline and call
+   `fugu.run(...)` directly — no `build_fugu()` factory.
 
 ### Non-Functional Requirements
-- **Minimalism:** One notebook cell; prefer SDK built-ins over custom code.
+- **Minimalism:** One notebook cell; the `Fugu` class has only `__init__`,
+  `run`, and `orchestrate`. Prefer SDK built-ins over custom code.
 - **Cost/latency control:** Every SDK agent (orchestrator, pool members,
   synthesizer, verifier) MUST run under budget + runtime middleware so one
-  request cannot run away. Provider-resilience middleware (`ModelRetryMiddleware`)
-  MUST be attached to make the route-around narrative concrete at the SDK layer.
-- **Observability:** A `verbose` switch MUST print the routing decision and each
-  dispatch/route-around event so the reader can see orchestration happening.
+  request cannot run away. `ModelRetryMiddleware` is attached for transient
+  provider errors.
 - **Testability:** The orchestration core MUST be exercisable with fake,
   duck-typed agents and no network/model/SDK dependency, so the Phase 5 script is
-  deterministic and offline.
+  deterministic and offline. The cell's live SDK construction is guarded by
+  `try/except ImportError` so the offline harness can exec the same cell.
 - **Honesty:** The notebook MUST clearly state what is real (architecture) vs.
   stubbed (the "learned coordinator" is just a prompted LLM; non-OpenAI vendors
   are availability-gated), per cookbook norms.
@@ -145,53 +142,51 @@ The notebook builds a single `Fugu` facade class over three kinds of SDK
 `BaseAgent`s plus a model pool:
 
 - **Orchestrator** — *the "Fugu model."* A `BaseAgent` with
-  `output_schema=OrchestrationPlan`. Given a prompt it returns a typed plan:
-  `mode` (`direct`/`delegate`), `reasoning`, and (when delegating) a list of
-  `Subtask`s each with an `assigned_to` specialty key.
+  `output_schema=OrchestrationPlan`. Given a prompt it returns a typed plan with
+  just `mode` (`direct`/`delegate`) and `reasoning`.
 - **Pool** — a list of `PoolModel` records (`key`, `provider`, `model`, `agent`),
   each a `BaseAgent` on a distinct vendor (`anthropic` reasoning, `openai`
-  coding/fast, `gemini` long-context, `deepseek`/`xai` …). "The world's best
-  models," entirely swappable by editing the list. Pool members carry the proven
-  keyless Wikipedia `search`/`read_article` tools so delegated subtasks produce
+  coding, `gemini` long-context, `deepseek` fast). "The world's best models,"
+  entirely swappable by editing the list. Pool members carry the proven
+  keyless Wikipedia `search`/`read_article` tools so delegated work produces
   grounded output.
 - **Synthesizer** — a `BaseAgent` that merges worker outputs into one answer.
 - **Verifier** (Ultra only) — a `BaseAgent` that critiques and finalizes the
   synthesized answer.
 
-`Fugu.run` orchestrates internally and returns one string:
+`Fugu.run` delegates to `orchestrate`, which routes internally and returns one
+string:
 
 ```
-                         +--------------------------- Fugu.run(prompt) ---------------------------+
-                         |                                                                        |
-  prompt --> ORCHESTRATOR|  plan.mode == "direct"   -->  one available model  -------------> answer
-   (one     (output_schema|                                                                       |
-    API)     = Plan)      |  plan.mode == "delegate" --> for each subtask:                          |
-                         |        resolve(assigned_to) --[unavailable? route around]--> pool model |
-                         |        (assigned_to == "fugu" & depth<MAX --> recurse self)              |
-                         |        gather worker outputs --> SYNTHESIZER --> draft                   |
-                         |        if ultra: --> VERIFIER --> final                                  |
-                         +------------------------------------------------------------------------+
-                 pool = [anthropic:reasoning, openai:coding, gemini:long_context, deepseek:fast, ...]
-                 availability = (key not opted out) AND (provider API key present)
+                       +--------------------------- Fugu.run(prompt) --------------------------+
+                       |                                                                       |
+  prompt --> ORCHESTRATOR|  plan.mode == "direct"   -->  first available model  ----------> answer
+   (one    (output_schema|                                                                       |
+    API)    = Plan)     |  plan.mode == "delegate" --> for each available pool expert:          |
+                       |        expert.agent.run(prompt) -> labeled output                      |
+                       |        gather outputs --> SYNTHESIZER --> draft                        |
+                       |        if ultra: --> VERIFIER --> final                               |
+                       +---------------------------------------------------------------------+
+               pool = [anthropic:reasoning, openai:coding, gemini:long_context, deepseek:fast]
+               available = (key not opted out) AND (provider API key present)
 ```
 
 **Key design decisions:**
 - **Learned routing via `output_schema`, not `ConditionalPipeline`.** Fugu's
-  routing is a model decision over open-ended assignments; `ConditionalPipeline`'s
-  predicate is synchronous/keyword-based and can't express "the model decomposes
-  and assigns." We drive a dynamic dispatch from the orchestrator's structured
-  plan. (`MapReducePipeline` is the closest static analog and is named in the
+  routing is a model decision; `ConditionalPipeline`'s predicate is
+  synchronous/keyword-based and can't express "the model decides whether to
+  assemble a team." We read the orchestrator's structured plan.
+  (`MapReducePipeline` is the closest static analog and is named in the
   narrative as the "fixed-team" version.)
-- **Class orchestrator, not a pipeline** — matches the `self-refine` house style:
-  typed objects and a conditional/recursive control flow cross stage boundaries,
-  which pipelines (string-in/string-out) can't carry.
-- **Availability gating is the demo.** With only `OPENAI_API_KEY`, the
-  anthropic/gemini/xai subtasks are "unavailable" and Fugu routes them to the
-  OpenAI model — making the headline feature runnable with one key and one
-  visible printout.
-- **Availability is a plain env-var lookup** (`PROVIDER_ENV` dict) inside the
-  core class, so the core has *zero* SDK import at definition time and the test
-  harness can exec it offline. The narrative points to
+- **Class orchestrator with one `orchestrate` method, not a pipeline** — matches
+  the `self-refine` house style but reduced to a single internal method. `run`
+  is a thin public wrapper over `orchestrate`.
+- **Availability gating drives the demo.** With only `OPENAI_API_KEY`, the
+  anthropic/gemini/deepseek experts are "unavailable" and only the OpenAI expert
+  is called in `delegate` mode — runnable with one key.
+- **Availability is a plain env-var lookup** (`PROVIDER_ENV` dict) inside
+  `orchestrate`, so the core has *zero* SDK import at definition time and the
+  test harness can exec it offline. The narrative points to
   `ProviderModelRegistry.get_api_key_env_var` as the SDK-native equivalent.
 - **Tiers are one flag** (`ultra`) on one class — matching "both models, one API."
 - **Duck-typed pool agents.** `Fugu` only calls `.run(str).content` on pool
@@ -204,9 +199,11 @@ The notebook builds a single `Fugu` facade class over three kinds of SDK
 The deliverable is one notebook with exactly one executable code cell. That cell
 is marked with a leading `# [fugu-core]` sentinel comment so the verification
 script can exec it offline. Top-level definitions import only `os`,
-`dataclasses`, `typing`, and `pydantic`; live SDK imports happen inside
-`build_fugu()`, so tests can exercise `Fugu` with fakes without importing
-`vidbyte` or making model calls.
+`dataclasses`, `typing`, and `pydantic`; the live SDK construction
+(`import vidbyte`, building the agents, and calling `fugu.run(...)`) sits in a
+`try/except ImportError` block at the bottom of the same cell, so tests can
+exercise `Fugu` with fakes without importing `vidbyte` or making model calls,
+while a real notebook run executes the whole cell top-to-bottom.
 
 ### 6.1 Schemas (`# [fugu-core]`)
 
@@ -218,24 +215,18 @@ Typed boundary for the orchestrator's routing decision.
 
 #### Interface / API
 ```python
-from __future__ import annotations
 from pydantic import BaseModel, Field
-
-class Subtask(BaseModel):
-    description: str = Field(description="A self-contained unit of work.")
-    assigned_to: str = Field(description="Pool specialty key best suited to this subtask, e.g. 'reasoning'.")
 
 class OrchestrationPlan(BaseModel):
     mode: str = Field(description='Exactly "direct" (one model) or "delegate" (assemble a team).')
     reasoning: str = Field(description="One sentence: why this route.")
-    subtasks: list[Subtask] = Field(default_factory=list, description="Subtasks when delegating; empty when direct.")
 ```
 `mode` is a value-constrained `str` (not `Literal`) to match the proven house
-structured-output pattern.
+structured-output pattern. There is no `Subtask` model and no `subtasks` field —
+the orchestrator no longer decomposes the request.
 
 #### Edge Cases & Error Handling
-- `mode="delegate"` with empty `subtasks` → handled by `Fugu` (falls back to direct).
-- Provider that doesn't support / fails structured output → `_orchestrate` reads
+- Provider that doesn't support / fails structured output → `orchestrate` reads
   `reply.metadata["structured"]`; if absent/invalid, falls back to a `direct`
   plan rather than crashing.
 
@@ -266,8 +257,9 @@ class PoolModel:
 **Type:** New
 
 #### What it does
-The single-model facade. Orchestrates internally; returns one answer. Class-first
-with small, plain-English methods composed by `run`.
+The single-model facade. Orchestrates internally; returns one answer. The class
+has only `__init__`, `run`, and `orchestrate` — all routing, dispatch,
+synthesis, and verification happen inline inside `orchestrate`.
 
 #### Interface / API
 ```python
@@ -275,72 +267,36 @@ PROVIDER_ENV = {
     "openai": "OPENAI_API_KEY", "anthropic": "ANTHROPIC_API_KEY",
     "gemini": "GEMINI_API_KEY", "xai": "XAI_API_KEY", "deepseek": "DEEPSEEK_API_KEY",
 }
-MAX_RECURSION_DEPTH = 2
 
 class Fugu:
-    def __init__(self, orchestrator, pool, synthesizer, verifier=None, *, ultra=False, exclude=(), verbose=False): ...
-    def run(self, prompt: str, _depth: int = 0) -> str: ...        # public single-model API
-    # private, semantically named:
-    def _orchestrate(self, prompt: str) -> OrchestrationPlan: ...  # ask the Fugu model how to route (safe-fallback to direct)
-    def _available(self, key: str) -> bool: ...                    # member not opted out and provider key present
-    def _resolve(self, requested_key: str) -> PoolModel: ...       # assigned model, or route around to any available
-    def _run_subtask(self, task: Subtask, depth: int) -> str: ...  # dispatch one subtask (recurse if assigned to 'fugu')
-    def _dispatch(self, subtasks, depth: int) -> list[str]: ...    # run every subtask, collecting source-labeled outputs
-    def _synthesize(self, prompt: str, outputs: list[str]) -> str: ...
-    def _verify(self, prompt: str, answer: str) -> str: ...        # Ultra-only critique/finalize pass
-    def _solve_directly(self, prompt: str) -> str: ...             # answer with a single available model
-    def _say(self, msg: str) -> None: ...                          # verbose trace
+    def __init__(self, orchestrator, pool, synthesizer, verifier=None, *, ultra=False, exclude=()): ...
+    def run(self, prompt: str) -> str: ...          # public single-model API (thin wrapper)
+    def orchestrate(self, prompt: str) -> str: ...  # route + assemble + synthesize (+ verify if ultra)
 ```
 
 #### Logic / Algorithm
-`run(prompt, _depth=0)`:
-1. `plan = self._orchestrate(prompt)`; print decision if verbose.
-2. If `plan.mode != "delegate"` **or** `not plan.subtasks` → `return self._solve_directly(prompt)`.
-3. `outputs = self._dispatch(plan.subtasks, _depth)`.
-4. `answer = self._synthesize(prompt, outputs)`.
-5. `return self._verify(prompt, answer) if (self.ultra and self.verifier) else answer`.
+`run(prompt)` → `return self.orchestrate(prompt)`.
 
-`_orchestrate`: call `self.orchestrator.run(prompt)`; read
-`reply.metadata.get("structured")`; coerce to `OrchestrationPlan`
-(`model_validate` if a dict); on missing/invalid, return
-`OrchestrationPlan(mode="direct", reasoning="fallback: no structured plan")`.
-
-`_available(key)`: `key in self.by_key` AND `key not in self.exclude` AND
-`os.getenv(PROVIDER_ENV.get(self.by_key[key].provider, "")) ` truthy. Unknown key → `False`.
-
-`_resolve(requested_key)`:
-1. If `_available(requested_key)` → return `self.by_key[requested_key]`.
-2. Else iterate pool in declared order; return the first `_available` member
-   (route-around; print a notice if verbose).
-3. If none available → raise `RuntimeError("Fugu: no available models in pool")`.
-
-`_run_subtask(task, depth)`:
-1. If `task.assigned_to == "fugu"` and `depth < MAX_RECURSION_DEPTH` → return
-   `self.run(task.description, _depth=depth+1)` (recursive self-call).
-2. `member = self._resolve(task.assigned_to)`.
-3. `try: return f"[{member.key}] " + member.agent.run(task.description).content`
-   `except Exception:` route around among the *remaining* available members
-   (exclude the failed key); run a substitute if one exists; otherwise re-raise.
-
-`_dispatch(subtasks, depth)`: `return [self._run_subtask(t, depth) for t in subtasks]`.
-
-`_synthesize`: `self.synthesizer.run(prompt + "\n\nExpert outputs:\n" + "\n\n".join(outputs)).content`.
-
-`_verify`: `self.verifier.run(<prompt + draft answer>).content`.
-
-`_solve_directly`: `self._resolve("__any__").agent.run(prompt).content` (the
-`"__any__"` sentinel is never a real key, so `_resolve` falls through to "first
-available," reusing the route-around path).
+`orchestrate(prompt)`:
+1. Try to read a structured `OrchestrationPlan` from
+   `self.orchestrator.run(prompt).metadata.get("structured")` (coerce via
+   `model_validate` if it is a dict); on any missing/invalid payload, fall back
+   to `OrchestrationPlan(mode="direct", reasoning="fallback: no structured plan")`.
+2. `available = [m for m in self.pool if m.key not in self.exclude and
+   os.getenv(PROVIDER_ENV.get(m.provider, ""))]`.
+3. If `not available` → raise `RuntimeError("Fugu: no available models in pool")`.
+4. If `plan.mode != "delegate"` → `return available[0].agent.run(prompt).content`
+   (direct: one model).
+5. `outputs = [f"[{m.key}] {m.agent.run(prompt).content}" for m in available]`.
+6. `answer = self.synthesizer.run(<prompt + labeled expert outputs>).content`.
+7. If `self.ultra and self.verifier` →
+   `return self.verifier.run(<prompt + draft answer>).content`; else `return answer`.
 
 #### Edge Cases & Error Handling
-- Empty pool / all opted out / no keys → `_resolve` raises `RuntimeError` (Req 6).
-- `delegate` + empty subtasks → step 2 falls back to direct (Req 10).
-- Unknown `assigned_to` → `_resolve` route-around path (Req 11).
-- Runtime call failure → in-call route-around to a remaining available member
-  (Req 5); only re-raises if no substitute remains.
-- Recursion → capped at `MAX_RECURSION_DEPTH` (Req 9); beyond the cap, `"fugu"`
-  assignments resolve as ordinary route-around to a model.
-- Structured-output failure → safe `direct` fallback, never a crash.
+- Empty pool / all opted out / no keys → step 3 raises `RuntimeError` (Req 5).
+- Structured-output failure → step 1 safe `direct` fallback, never a crash.
+- `delegate` with only one available expert → step 5 produces a single labeled
+  output and synthesis still runs.
 
 ### 6.4 System prompts
 
@@ -348,20 +304,22 @@ available," reusing the route-around path).
 **Type:** New
 
 Three compact prompt strings in the same cell: ORCHESTRATOR (routing policy +
-the list of specialty keys incl. `fugu`; prefer `direct` for simple asks,
-`delegate` for hard/multi-domain ones), SYNTHESIZER (merge expert outputs into
-one authoritative answer, reconcile conflicts), VERIFIER (Ultra: check the
-answer against the request, fix errors, return the final answer only).
+the list of specialty keys — `reasoning`, `coding`, `long_context`, `fast`;
+prefer `direct` for simple asks, `delegate` for hard/multi-domain ones),
+SYNTHESIZER (merge expert outputs into one authoritative answer, reconcile
+conflicts), VERIFIER (Ultra: check the answer against the request, fix errors,
+return the final answer only).
 
 ### 6.5 Pool, agents, tools & middleware construction
 
 **File(s):** same notebook, same `# [fugu-core]` cell.
 **Type:** New
 
-`build_fugu()` imports the minimal SDK surface, defines the keyless Wikipedia
+The bottom of the cell (inside a `try/except ImportError` block so offline test
+exec skips it) imports the minimal SDK surface, defines the keyless Wikipedia
 tools (`search`, `read_article`), builds the orchestrator/synthesizer/verifier
-`BaseAgent`s, and returns a configured `Fugu`. Middleware (verified signatures)
-attached to each agent:
+`BaseAgent`s, builds the pool, constructs a `Fugu`, and calls `fugu.run(...)`.
+Middleware (verified signatures) attached to each agent:
 ```python
 [ TokenBudgetMiddleware(max_tokens=...),
   CostBudgetMiddleware(max_spend_usd=..., cost_per_million_tokens=...),
@@ -384,9 +342,9 @@ disclaimer.
 
 ## 7. Data Model Changes
 
-N/A — no database, schema, or persistent store. The only "schemas" are the
-in-notebook Pydantic models (`Subtask`, `OrchestrationPlan`) defined in §6.1,
-used purely as the orchestrator's structured-output boundary.
+N/A — no database, schema, or persistent store. The only "schema" is the
+in-notebook Pydantic model `OrchestrationPlan` defined in §6.1, used purely as
+the orchestrator's structured-output boundary.
 
 ---
 
@@ -415,55 +373,43 @@ Counts: **3 created, 2 modified, 0 deleted.**
 ## 10. Testing Plan
 
 The verification script `scripts/test_sakana_fugu.py` loads the notebook as JSON,
-execs only the single `# [fugu-core]` cell (offline, no SDK), and drives `Fugu` with
-**fake agents**. A `FakeAgent` returns a canned `reply` whose `.content` is a
-fixed string and (for the orchestrator) whose `.metadata["structured"]` is a
-chosen `OrchestrationPlan`. A `FailingAgent` raises on `.run`. Availability is
-controlled by setting/clearing provider env vars inside each test.
+execs only the single `# [fugu-core]` cell (offline, no SDK), and drives `Fugu`
+with **fake agents**. A `FakeAgent` returns a canned `reply` whose `.content` is
+a fixed string and (for the orchestrator) whose `.metadata["structured"]` is a
+chosen `OrchestrationPlan`. Availability is controlled by setting/clearing
+provider env vars inside each test.
 
 ### Unit Tests
-- `Fugu.run` → `it('returns a single string in direct mode without dispatching')` — [Edge Case]
-- `Fugu.run` → `it('dispatches each subtask and synthesizes in delegate mode')` — happy path
-- `_resolve` → `it('returns the assigned model when its provider key is present')` — happy path
-- `_resolve` → `it('routes around to an available model when the assigned provider key is absent')` — [Hidden Assumption]
-- `_resolve` → `it('routes around for an unknown assigned_to key instead of raising KeyError')` — [Hidden Failure]
-- `_resolve` → `it('treats an opted-out (excluded) member as unavailable even if its key is present')` — [Hidden Assumption]
-- `_resolve` → `it('raises RuntimeError when no pool model is available')` — [Silent Failure]
-- `run` → `it('falls back to direct when mode is delegate but subtasks is empty')` — [Silent Failure]
-- `run` → `it('handles a delegate plan with exactly one subtask (N=1)')` — [Edge Case]
-- `_run_subtask` → `it('routes around at runtime when the assigned agent.run raises mid-call')` — [Hidden Failure]
-- `_run_subtask` → `it('re-raises only when no substitute remains after a runtime failure')` — [Hidden Failure]
-- `_run_subtask` → `it('recurses into Fugu when assigned_to == "fugu" and stops at MAX_RECURSION_DEPTH')` — [Hidden Failure]
+- `Fugu.run` → `it('returns a single string in direct mode without synthesizing')` — [Edge Case]
+- `Fugu.run` → `it('calls every available expert and synthesizes in delegate mode')` — happy path
+- `Fugu.run` → `it('skips experts whose provider key is absent')` — [Hidden Assumption]
 - `run` (ultra) → `it('runs the verifier pass when ultra=True and not when ultra=False')` — [Edge Case]
-- `_orchestrate` → `it('falls back to a direct plan when structured output is missing/invalid')` — [Silent Failure]
-- `_dispatch` → `it('labels each output with its source model key')` — [Silent Failure]
+- `orchestrate` → `it('falls back to a direct plan when structured output is missing/invalid')` — [Silent Failure]
+- `run` → `it('raises RuntimeError when no pool model is available')` — [Silent Failure]
+- `run` → `it('never calls an opted-out (excluded) member')` — [Hidden Assumption]
 
 ### Integration Tests
-- End-to-end (fakes): a `delegate` plan with three subtasks assigned to
-  `reasoning`(anthropic, key absent), `coding`(openai, key present),
-  `long_context`(gemini, key absent) — with only `OPENAI_API_KEY` set, assert all
-  three resolve to the OpenAI member (route-around) and the synthesizer is called
-  once with three labeled outputs. This is the headline-feature path and the
-  exact scenario the notebook's usage line is meant to exercise.
+- End-to-end (fakes): a `delegate` plan with a pool of three vendors
+  (`reasoning`(anthropic, key absent), `coding`(openai, key present),
+  `long_context`(gemini, key absent)) — with only `OPENAI_API_KEY` set, assert
+  only the OpenAI expert is called and the synthesizer is called once with a
+  labeled output. This is the headline scenario the notebook's usage line is
+  meant to exercise.
 - Silent-failure path: when the orchestrator emits `delegate` but every provider
   key is cleared, `run` raises rather than the synthesizer being called with an
   empty list and returning a hollow answer.
-- Hidden assumption: the orchestrator may assign a key not in the pool; assert the
-  dispatch still completes via route-around through a real `OrchestrationPlan`
-  `model_validate` round-trip.
+- A plan constructed via `OrchestrationPlan.model_validate(...)` (as the SDK
+  would produce) round-trips and `delegate` runs end-to-end.
 
 ### Manual / QA Test Cases
-1. Given only `OPENAI_API_KEY`, running `build_fugu().run(...)` with
-   `verbose=True` shows non-OpenAI subtasks re-routed to the OpenAI model and a
-   single coherent final answer — [Hidden Assumption].
-2. Given `ANTHROPIC_API_KEY` also set, `reasoning` subtasks resolve to the
-   anthropic member (no route-around for that key) — [Edge Case].
-3. Given `exclude=("coding",)`, a subtask assigned to `coding` routes around —
+1. Given only `OPENAI_API_KEY`, running the cell calls only the OpenAI expert in
+   `delegate` mode and prints one coherent final answer — [Hidden Assumption].
+2. Given `exclude=("coding",)`, the coding expert is never called —
    [Hidden Assumption].
-4. Given a simple factual prompt, `mode` is `direct` and only one model is
-   consulted (verbose shows no dispatch) — [Edge Case].
-5. Given `ultra=True` vs `ultra=False` on the same delegate prompt, the Ultra run
-   performs an extra verifier call visible in verbose output — [Edge Case].
+3. Given a simple factual prompt, `mode` is `direct` and only one model is
+   consulted — [Edge Case].
+4. Given `ultra=True` vs `ultra=False` on the same delegate prompt, the Ultra
+   run performs an extra verifier call — [Edge Case].
 
 ---
 
@@ -471,12 +417,12 @@ controlled by setting/clearing provider env vars inside each test.
 
 | Dependency | Version / Endpoint | Purpose | Risk |
 |------------|--------------------|---------|------|
-| `vidbyte-sdk` | current repo surface | `BaseAgent`, `output_schema`, `fork`, middleware | Pre-release API drift; mitigated by using only documented/verified primitives. |
-| `pydantic` | 2.x | Structured-output schemas | Low; used by sibling notebooks. |
+| `vidbyte-sdk` | current repo surface | `BaseAgent`, `output_schema`, middleware | Pre-release API drift; mitigated by using only documented/verified primitives. |
+| `pydantic` | 2.x | Structured-output schema | Low; used by sibling notebooks. |
 | `python-dotenv` | any | Load `.env` | Low. |
 | `requests` | any | Keyless Wikipedia tools for pool members | Low; reused verbatim from siblings. |
 | OpenAI API | `OPENAI_API_KEY` | Default provider for orchestrator/synthesizer/pool | Cost; mitigated by budget/runtime middleware. |
-| Anthropic/Gemini/xAI/DeepSeek APIs | respective keys (optional) | Real multi-vendor pool; absent keys drive the route-around demo | None when absent — absence is intended. |
+| Anthropic/Gemini/xAI/DeepSeek APIs | respective keys (optional) | Real multi-vendor pool; absent keys leave the expert unavailable | None when absent — absence is intended. |
 | stdlib `json` | — | Test harness reads the notebook (no nbformat dep) | Low; JSON parse only. |
 
 ---
@@ -487,9 +433,9 @@ controlled by setting/clearing provider env vars inside each test.
 - **Breaking change:** No — purely additive (one new folder + README rows).
 - **Deployment order:** N/A (documentation/example repo).
 - **Rollback:** Revert the branch / delete `sdk/sakana-fugu/` and the README rows.
-- **Process:** Worktree branch `feat/sakana-fugu-cookbook-example` off `origin/main`;
-  design-doc commit first, then notebook, then test script, then README updates;
-  open a **draft PR targeting `main`** with this doc as the body.
+- **Process:** Worktree branch off `origin/main`; design-doc commit first, then
+  notebook, then test script, then README updates; open a PR targeting `main`
+  with this doc as the body.
 
 ---
 
@@ -498,10 +444,11 @@ controlled by setting/clearing provider env vars inside each test.
 - [x] **Folder name** → `sdk/sakana-fugu/` (confirmed; named after the rebuilt system).
 - [x] **Base branch** → branch off `origin/main`, PR into `main` (confirmed;
   `main` already contains the cookbook content — local `main` was merely stale).
+- [x] **Class surface** → `run` + `orchestrate` only; no subtask/resolve/dispatch/
+  solve_directly/_say/build_fugu (confirmed by review feedback on PR #7).
 - [ ] **Pool vendor list / model ids.** Proposed: anthropic→reasoning,
   openai→coding, gemini→long_context, deepseek→fast. Illustrative only; only
   OpenAI runs in the default demo. Confirm exact model ids to name.
-- [ ] **Recursive self-call depth.** `MAX_RECURSION_DEPTH = 2` proposed.
 
 ## 14. Alternatives Considered
 
@@ -511,19 +458,17 @@ controlled by setting/clearing provider env vars inside each test.
 - **Why rejected:** It's the most literal "one agent orchestrating many," but it
   is *strictly incompatible with middleware* (the cookbook format requires budget
   + safety middleware) and uses fixed personas on a single configured model. It
-  cannot express Fugu's defining features: a *multi-vendor* swappable pool and
-  *route-around on provider unavailability*. Mentioned in the notebook's "what
-  production adds / turn it up" section as the swarm upgrade path.
+  cannot express a *multi-vendor* swappable pool. Mentioned in the notebook's
+  "what production adds / turn it up" section as the swarm upgrade path.
 
 ### Alternative 2: `ConditionalPipeline` + `MapReducePipeline` only
 - **What:** Route with `ConditionalPipeline` (predicate) into a fixed
   `MapReducePipeline` (map to specialists, reduce to synthesis).
 - **Why rejected:** `ConditionalPipeline`'s predicate is synchronous and keyword-
-  based — it can't model a *learned* decomposition with per-subtask model
-  assignment, and `MapReducePipeline` has a *fixed* map set, so it can't route
-  around an unavailable member. We instead drive dynamic dispatch from the
-  orchestrator's `output_schema` plan. `MapReducePipeline` is referenced in the
-  narrative as the "static fixed-team" cousin of Fugu's dynamic dispatch.
+  based — it can't model a *learned* decision to assemble a team. We instead
+  read the orchestrator's `output_schema` plan. `MapReducePipeline` is
+  referenced in the narrative as the "static fixed-team" cousin of Fugu's
+  dynamic team assembly.
 
 ### Alternative 3: A real OpenAI-compatible HTTP endpoint
 - **What:** Stand up a FastAPI `/v1/chat/completions` server wrapping `Fugu`.
@@ -537,6 +482,14 @@ controlled by setting/clearing provider env vars inside each test.
   Instead, the single notebook cell is marked `# [fugu-core]` and the test harness
   execs that cell from the `.ipynb`, keeping the single-notebook rule while
   staying testable.
+
+### Alternative 5: Keep subtask decomposition, route-around, and recursion
+- **What:** The earlier `Fugu` with `Subtask`, `_resolve`/`_dispatch`/`_run_subtask`,
+  `_solve_directly`, `_say`, recursive self-call, and a `build_fugu()` factory.
+- **Why rejected:** Review feedback on PR #7 asked to reduce the class to a
+  "multi-agent orchestration" skeleton with only `orchestrate` and `run`. All
+  subtask / resolve / dispatch / direct-solve / verbose-tracer / factory
+  machinery was removed and inlined into `orchestrate`.
 
 ---
 
