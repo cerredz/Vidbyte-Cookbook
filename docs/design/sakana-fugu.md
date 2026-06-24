@@ -31,14 +31,14 @@ notebook" format.
   delegate), swappable multi-vendor pool, dispatch → synthesize, **route-around
   on provider unavailability**, two tiers (Fugu / Fugu Ultra), agent opt-out,
   and guarded recursive self-call.
-- Use real `vidbyte-sdk` primitives (`BaseAgent`, `output_schema`, `fork`,
-  budget/runtime middleware) rather than hand-rolled equivalents.
-- Keep the implementation minimal — the orchestration core compressed into one
-  notebook code block, well under ~80 lines of Python — per the user's explicit
-  "least amount of code lines" ask.
+- Use the minimal real `vidbyte-sdk` primitive set needed for the product shape:
+  `BaseAgent`, `@tool`, `output_schema`, and budget/runtime/retry middleware.
+- Keep the implementation minimal — the entire notebook is one executable code
+  cell containing the Fugu facade and live SDK wiring — per the user's explicit
+  "one Jupyter notebook cell, one code block" ask.
 - Be runnable top-to-bottom with a single `OPENAI_API_KEY`, and make the
   route-around feature *demonstrable* with only that one key.
-- Conform to the cookbook's notebook structure and update both index READMEs.
+- Keep the folder as a single-notebook cookbook example and update both index READMEs.
 - Ship a deterministic verification script that tests the orchestration logic
   (routing, route-around, opt-out, tiers, recursion) with fake agents — no live
   model calls.
@@ -119,12 +119,11 @@ notebook" format.
     than returning an empty answer.
 11. An unknown `assigned_to` key MUST route around (pick any available model),
     not raise `KeyError`.
-12. The notebook MUST run end-to-end with only `OPENAI_API_KEY` set, and MUST
-    include a cell that visibly demonstrates route-around using just that key.
+12. The notebook MUST expose a one-line `build_fugu().run(...)` usage path that
+    demonstrates route-around with only `OPENAI_API_KEY` set.
 
 ### Non-Functional Requirements
-- **Minimalism:** Orchestration core < ~80 lines; prefer SDK built-ins over
-  custom code.
+- **Minimalism:** One notebook cell; prefer SDK built-ins over custom code.
 - **Cost/latency control:** Every SDK agent (orchestrator, pool members,
   synthesizer, verifier) MUST run under budget + runtime middleware so one
   request cannot run away. Provider-resilience middleware (`ModelRetryMiddleware`)
@@ -202,11 +201,12 @@ The notebook builds a single `Fugu` facade class over three kinds of SDK
 
 ## 6. Detailed Design
 
-The deliverable is one notebook whose Fugu product core fits in one code block.
-That block is marked with a leading `# [fugu-core]` sentinel comment so the
-verification script can exec it offline (no `%pip`, env, or model-running cells).
-It imports only `os`, `dataclasses`, `typing`, and `pydantic` — never `vidbyte`
-at definition time.
+The deliverable is one notebook with exactly one executable code cell. That cell
+is marked with a leading `# [fugu-core]` sentinel comment so the verification
+script can exec it offline. Top-level definitions import only `os`,
+`dataclasses`, `typing`, and `pydantic`; live SDK imports happen inside
+`build_fugu()`, so tests can exercise `Fugu` with fakes without importing
+`vidbyte` or making model calls.
 
 ### 6.1 Schemas (`# [fugu-core]`)
 
@@ -347,26 +347,26 @@ available," reusing the route-around path).
 **File(s):** same notebook
 **Type:** New
 
-Three prompts (Identity → Goal → Checklist house pattern): ORCHESTRATOR (routing
-policy + the list of available specialty keys incl. `fugu`; prefer `direct` for
-simple asks, `delegate` for hard/multi-domain ones), SYNTHESIZER (merge expert
-outputs into one authoritative answer, reconcile conflicts), VERIFIER (Ultra:
-check the answer against the request, fix errors, return the final answer only).
+Three compact prompt strings in the same cell: ORCHESTRATOR (routing policy +
+the list of specialty keys incl. `fugu`; prefer `direct` for simple asks,
+`delegate` for hard/multi-domain ones), SYNTHESIZER (merge expert outputs into
+one authoritative answer, reconcile conflicts), VERIFIER (Ultra: check the
+answer against the request, fix errors, return the final answer only).
 
 ### 6.5 Pool, agents, tools & middleware construction
 
-**File(s):** same notebook; NOT `# [fugu-core]`.
+**File(s):** same notebook, same `# [fugu-core]` cell.
 **Type:** New
 
-Builds the keyless Wikipedia tools (`search`, `read_article`, reused verbatim
-from the sibling notebooks), the orchestrator/synthesizer/verifier `BaseAgent`s,
-and the `PoolModel` list using `provider`/`model_name`. Middleware (verified
-signatures) attached to each agent:
+`build_fugu()` imports the minimal SDK surface, defines the keyless Wikipedia
+tools (`search`, `read_article`), builds the orchestrator/synthesizer/verifier
+`BaseAgent`s, and returns a configured `Fugu`. Middleware (verified signatures)
+attached to each agent:
 ```python
 [ TokenBudgetMiddleware(max_tokens=...),
   CostBudgetMiddleware(max_spend_usd=..., cost_per_million_tokens=...),
   RuntimeLimitMiddleware(max_model_calls=..., max_elapsed_seconds=...),
-  ModelRetryMiddleware(max_retries=...) ]
+  ModelRetryMiddleware(max_attempts=...) ]
 ```
 The orchestrator/synthesizer/verifier use env `PROVIDER`/`MODEL`; pool members
 name real vendors so availability gating is meaningful.
@@ -444,7 +444,7 @@ controlled by setting/clearing provider env vars inside each test.
   `long_context`(gemini, key absent) — with only `OPENAI_API_KEY` set, assert all
   three resolve to the OpenAI member (route-around) and the synthesizer is called
   once with three labeled outputs. This is the headline-feature path and the
-  exact scenario the notebook's live demo cell shows.
+  exact scenario the notebook's usage line is meant to exercise.
 - Silent-failure path: when the orchestrator emits `delegate` but every provider
   key is cleared, `run` raises rather than the synthesizer being called with an
   empty list and returning a hollow answer.
@@ -453,7 +453,7 @@ controlled by setting/clearing provider env vars inside each test.
   `model_validate` round-trip.
 
 ### Manual / QA Test Cases
-1. Given only `OPENAI_API_KEY`, running the route-around demo cell with
+1. Given only `OPENAI_API_KEY`, running `build_fugu().run(...)` with
    `verbose=True` shows non-OpenAI subtasks re-routed to the OpenAI model and a
    single coherent final answer — [Hidden Assumption].
 2. Given `ANTHROPIC_API_KEY` also set, `reasoning` subtasks resolve to the
@@ -499,8 +499,8 @@ controlled by setting/clearing provider env vars inside each test.
 - [x] **Base branch** → branch off `origin/main`, PR into `main` (confirmed;
   `main` already contains the cookbook content — local `main` was merely stale).
 - [ ] **Pool vendor list / model ids.** Proposed: anthropic→reasoning,
-  openai→coding+fast, gemini→long_context, deepseek/xai→fast. Illustrative only;
-  only OpenAI runs in the default demo. Confirm exact model ids to name.
+  openai→coding, gemini→long_context, deepseek→fast. Illustrative only; only
+  OpenAI runs in the default demo. Confirm exact model ids to name.
 - [ ] **Recursive self-call depth.** `MAX_RECURSION_DEPTH = 2` proposed.
 
 ## 14. Alternatives Considered
@@ -534,9 +534,9 @@ controlled by setting/clearing provider env vars inside each test.
 ### Alternative 4: Put the core in a `.py` module beside the notebook
 - **What:** Ship `sdk/sakana-fugu/fugu.py` and import it from the notebook + tests.
 - **Why rejected:** The cookbook skill mandates *exactly one notebook* per folder.
-  Instead, one compact core cell is marked `# [fugu-core]` and the test harness execs
-  just that cell from the `.ipynb`, keeping the single-notebook rule while staying
-  testable.
+  Instead, the single notebook cell is marked `# [fugu-core]` and the test harness
+  execs that cell from the `.ipynb`, keeping the single-notebook rule while
+  staying testable.
 
 ---
 
